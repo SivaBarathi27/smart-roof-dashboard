@@ -1,5 +1,5 @@
 streamlit==1.65.0
-pandas==3.0.1
+pandas==2.2.3
 numpy==2.2.6
 requests==2.33.1
 pvlib==0.16.1
