@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roof canvas</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10.3.1/dist/gridstack.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10.3.1/dist/gridstack-extra.min.css">
+<script src="https://cdn.jsdelivr.net/npm/gridstack@10.3.1/dist/gridstack-all.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<style>
+:root {
+  --bg: #0D1117; --panel: #161B22; --panel2: #1C232C; --line: rgba(150,160,175,.18);
+  --text: #E6EDF3; --muted: #8B95A3; --open: #F5A524; --closed: #4C8DF6; --air: #9AA4B2;
+  --now: #E5534B; --good: #2EA043;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: "Source Sans Pro", "Segoe UI", system-ui, sans-serif; font-size: 14px; }
+body { padding: 2px 2px 8px; overflow: hidden; }
+
+/* toolbar */
+#toolbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between;
+  padding: 4px 6px 8px; }
+.tb-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tb-label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-right: 1px solid var(--line); border-radius: 0; }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: var(--open); color: #111; font-weight: 600; }
+button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--open); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--open); color: #111; border-color: var(--open); font-weight: 600; }
+.dropdown { position: relative; }
+#addMenu { display: none; position: absolute; right: 0; top: 110%; z-index: 50; min-width: 220px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+#addMenu.show { display: block; }
+#addMenu div { padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+#addMenu div:hover { background: rgba(245,165,36,.15); }
+#addMenu .empty { color: var(--muted); cursor: default; }
+
+/* grid + panels */
+.grid-stack { background: transparent; }
+.grid-stack-item-content { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  display: flex; flex-direction: column; overflow: hidden; }
+.p-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px 14px; cursor: grab; user-select: none; }
+body.locked .p-head { cursor: default; }
+.p-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.p-sp { flex: 1; }
+.p-x { padding: 0 7px; line-height: 20px; font-size: 16px; background: transparent; border-color: transparent; color: var(--muted); }
+body.locked .p-x, body.locked .ui-resizable-handle { display: none !important; }
+.p-body { flex: 1; min-height: 0; padding: 4px 14px 12px; overflow: auto; }
+.p-body.chart { padding: 0 6px 4px; overflow: hidden; }
+.grid-stack-placeholder > .placeholder-content { border: 2px dashed var(--open); border-radius: 12px; background: rgba(245,165,36,.06); }
+
+/* info icon + tooltip */
+.tip { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; flex: none;
+  border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 10px; font-weight: 700;
+  font-style: italic; font-family: Georgia, serif; cursor: help; margin-left: 5px; vertical-align: middle; }
+.tip:hover { color: var(--open); border-color: var(--open); }
+#tooltip { position: fixed; z-index: 1000; max-width: 280px; padding: 8px 11px; border-radius: 8px; pointer-events: none;
+  background: #242C37; border: 1px solid var(--line); color: var(--text); font-size: 12.5px; line-height: 1.4;
+  box-shadow: 0 6px 18px rgba(0,0,0,.45); display: none; text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* KPI row */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; height: 100%; }
+.kpi { background: var(--panel2); border-radius: 10px; padding: 8px 12px; }
+.k-label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+  display: flex; align-items: center; }
+.k-val { font-size: 28px; font-weight: 700; line-height: 1.2; margin-top: 2px; }
+.k-val .u { font-size: 15px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+.k-delta { font-size: 12px; color: var(--muted); }
+
+/* roof control */
+.state-card { border-radius: 12px; padding: 10px 16px; margin-bottom: 10px; }
+.state-card .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; align-items: center; }
+.state-card .val { font-size: 32px; font-weight: 800; line-height: 1.15; }
+.kv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.kv > span:first-child { color: var(--muted); display: flex; align-items: center; }
+.note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.btns button { flex: 1; }
+
+/* comparison */
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cmp-col { background: var(--panel2); border-radius: 10px; padding: 10px 14px; border: 1px solid transparent; }
+.cmp-head { font-size: 28px; font-weight: 800; line-height: 1.2; display: flex; align-items: center; gap: 10px; }
+.badge { font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 2px 8px; border-radius: 999px;
+  background: rgba(46,160,67,.2); color: #56D364; }
+.cmp-row { margin-top: 8px; }
+.cmp-val { font-size: 28px; font-weight: 700; line-height: 1.2; }
+.cmp-val .u { font-size: 15px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+.cat { margin-top: 6px; font-weight: 600; font-size: 14px; }
+.scale-wrap { margin-top: 14px; }
+.scale-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 18px; display: flex; align-items: center; }
+.scale { position: relative; display: flex; height: 14px; border-radius: 7px; }
+.scale .seg-c { flex: 1; height: 100%; }
+.scale .seg-c:first-child { border-radius: 7px 0 0 7px; } .scale .seg-c:last-child { border-radius: 0 7px 7px 0; }
+.marker { position: absolute; top: -17px; transform: translateX(-50%); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.marker::after { content: ""; display: block; margin: 1px auto 0; width: 0; height: 0;
+  border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid currentColor; }
+.marker.below { top: 15px; }
+.marker.below::after { display: none; }
+.marker.below::before { content: ""; display: block; margin: 0 auto 1px; width: 0; height: 0;
+  border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 6px solid currentColor; }
+.ticks { position: relative; height: 16px; margin-top: 16px; font-size: 11px; color: var(--muted); }
+.ticks span { position: absolute; transform: translateX(-50%); top: 2px; }
+.names { display: flex; font-size: 10.5px; color: var(--muted); line-height: 1.2; text-align: center; }
+.names div { flex: 1; padding: 0 2px; }
+
+/* log */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em;
+  padding: 6px 6px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+td { padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.muted { color: var(--muted); }
+#err { color: #ff7b72; font-size: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <div class="tb-group">
+    <span class="tb-label">Time window</span>
+    <div class="seg" id="win">
+      <button data-h="6">6 h</button><button data-h="12">12 h</button><button data-h="24">24 h</button>
+      <button data-h="48">48 h</button><button data-h="all">All</button>
+    </div>
+    <span class="tip" data-tip="Sets the visible time range of every chart around the selected hour. You can also drag across a chart to zoom in, scroll to zoom, and double-click to reset; all charts follow together.">i</span>
+  </div>
+  <div class="tb-group">
+    <div class="dropdown"><button id="addBtn">+ Add panel</button><div id="addMenu"></div></div>
+    <button id="lockBtn"></button>
+    <button id="resetBtn">Reset layout</button>
+  </div>
+</div>
+<div class="grid-stack"></div>
+<div id="tooltip"></div>
+<div id="err"></div>
+
+<script>
+"use strict";
+window.addEventListener("error", e => { document.getElementById("err").textContent += (e.message || e) + "\n"; });
+
+// ------------------------------------------------------------------ Streamlit protocol
+function toStreamlit(type, extra) {
+  window.parent.postMessage(Object.assign({ isStreamlitMessage: true, apiVersion: 1, type }, extra), "*");
+}
+const sendValue = value => toStreamlit("streamlit:setComponentValue", { value, dataType: "json" });
+let lastHeight = 0;
+function fitHeight() {
+  const h = Math.ceil(document.body.getBoundingClientRect().height);  // content only, not the frame
+  if (Math.abs(h - lastHeight) > 2) { lastHeight = h; toStreamlit("streamlit:setFrameHeight", { height: h }); }
+}
+
+// ------------------------------------------------------------------ definitions
+const C = { open: "#F5A524", closed: "#4C8DF6", air: "#9AA4B2", now: "#E5534B", text: "#E6EDF3",
+            muted: "#8B95A3", grid: "rgba(150,160,175,.14)", good: "#2EA043", red: "#E5534B" };
+const DEF = {
+  air: "Air temperature measured 2 m above ground at the site.",
+  rh: "Relative humidity: how much water vapour the air holds compared with the maximum it could hold at the current temperature. High humidity reduces sweat evaporation.",
+  wind: "Wind speed at 10 m above ground. Wind increases convective cooling of people.",
+  flux: "Surface heat flux: rate of heat conducted into the ground surface per square metre for the active roof position. Positive = ground absorbing heat, negative = ground releasing heat.",
+  utci: "Universal Thermal Climate Index: the 'feels-like' temperature outdoors. It combines air temperature, mean radiant temperature, humidity and wind into the air temperature of a reference environment that causes the same physiological strain. 9–26 °C = no thermal stress.",
+  mrt: "Mean radiant temperature: the uniform surface temperature that would give a person the same radiant heat exchange (sun, sky, ground and roof) as the actual surroundings.",
+  position: "Current position of the retractable roof.",
+  mode: "Automatic: the controller moves the roof. Manual: the operator issues commands.",
+  recommended: "Position the controller considers most comfortable for the current hour.",
+  next: "The next hour at which the controller plans to move the roof, based on the forecast.",
+  since: "When the roof last moved to its current position.",
+  scale: "UTCI thermal-stress categories. Arrows mark the current UTCI for the open roof (O, above the bar) and closed roof (C, below the bar).",
+};
+const PANELS = {
+  kpis:       { title: "Site conditions", tip: "Conditions at the site for the selected hour, with change from the previous hour.", w: 12, h: 2 },
+  roof:       { title: "Roof control", tip: "Roof position, control mode and the controller's plan.", w: 4, h: 5 },
+  comparison: { title: "Position comparison", tip: "Radiant temperature and thermal comfort with the roof open versus closed for the selected hour.", w: 8, h: 5 },
+  schedule:   { title: "Controller schedule", tip: "Roof position planned by the automatic controller for every hour of the forecast. Hover for the reason of each move.", w: 12, h: 3, chart: true },
+  utci:       { title: "UTCI — thermal comfort", tip: DEF.utci, w: 6, h: 4, chart: true },
+  temp:       { title: "Air & mean radiant temperature", tip: "Air temperature together with the mean radiant temperature for both roof positions. " + DEF.mrt, w: 6, h: 4, chart: true },
+  flux:       { title: "Surface heat flux", tip: DEF.flux, w: 6, h: 4, chart: true },
+  humwind:    { title: "Humidity & wind", tip: DEF.rh + " " + DEF.wind, w: 6, h: 4, chart: true },
+  solar:      { title: "Solar radiation & cloud", tip: "Global (total), direct-normal and diffuse solar radiation, with cloud cover on the right axis.", w: 6, h: 4, chart: true },
+  log:        { title: "Event log", tip: "Roof movements by the controller and operator commands, newest first.", w: 6, h: 4 },
+};
+const DEFAULT_LAYOUT = [
+  { id: "kpis", x: 0, y: 0, w: 12, h: 2 }, { id: "roof", x: 0, y: 2, w: 4, h: 5 },
+  { id: "comparison", x: 4, y: 2, w: 8, h: 5 }, { id: "schedule", x: 0, y: 7, w: 12, h: 3 },
+  { id: "utci", x: 0, y: 10, w: 6, h: 4 }, { id: "temp", x: 6, y: 10, w: 6, h: 4 },
+  { id: "flux", x: 0, y: 14, w: 6, h: 4 }, { id: "humwind", x: 6, y: 14, w: 6, h: 4 },
+  { id: "solar", x: 0, y: 18, w: 6, h: 4 }, { id: "log", x: 6, y: 18, w: 6, h: 4 },
+];
+const UTCI_EDGES = [-55, -40, -27, -13, 0, 9, 26, 32, 38, 46, 56];
+const UTCI_CATS = [
+  ["Extreme cold stress", "#1A237E"], ["Very strong cold stress", "#1E4FBF"], ["Strong cold stress", "#2F7BE0"],
+  ["Moderate cold stress", "#5FA8F0"], ["Slight cold stress", "#A5D3F7"], ["No thermal stress", "#4CAF50"],
+  ["Moderate heat stress", "#F6C445"], ["Strong heat stress", "#F59331"], ["Very strong heat stress", "#E5532F"],
+  ["Extreme heat stress", "#A1191B"],
+];
+const LS_KEY = "smartRoofCanvas.layout.v1";
+
+// ------------------------------------------------------------------ helpers
+const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+const tip = text => `<span class="tip" data-tip="${esc(text)}">i</span>`;
+const ok = v => v !== null && v !== undefined && Number.isFinite(v);
+const num = (v, d = 1) => ok(v) ? v.toFixed(d) : "—";
+function utciCat(v) {
+  if (!ok(v)) return ["Unavailable", C.muted];
+  for (let k = 0; k < UTCI_CATS.length; k++) if (v < UTCI_EDGES[k + 1] || k === UTCI_CATS.length - 1) return UTCI_CATS[k];
+}
+const pad = n => String(n).padStart(2, "0");
+const parseT = s => new Date(s.replace(" ", "T"));
+const fmtT = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+let D = null;            // latest payload from Python
+let lastRaw = null;
+let grid = null;
+let xRange = null;       // shared chart time range (null = everything)
+let win = "24";
+let syncing = false;
+const charts = new Set();
+
+// ------------------------------------------------------------------ tooltip
+const tt = document.getElementById("tooltip");
+document.addEventListener("mouseover", e => {
+  const t = e.target.closest && e.target.closest("[data-tip]");
+  if (!t) { tt.style.display = "none"; return; }
+  tt.textContent = t.dataset.tip; tt.style.display = "block";
+  const r = t.getBoundingClientRect(), w = tt.offsetWidth, h = tt.offsetHeight;
+  const left = Math.min(Math.max(6, r.left + r.width / 2 - w / 2), window.innerWidth - w - 6);
+  const below = r.bottom + 8 + h < window.innerHeight;
+  tt.style.left = left + "px"; tt.style.top = (below ? r.bottom + 8 : r.top - h - 8) + "px";
+});
+
+// ------------------------------------------------------------------ grid / layout
+function loadLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_KEY));
+    if (Array.isArray(saved) && saved.length && saved.every(it => PANELS[it.id])) return saved;
+  } catch (e) { /* storage unavailable */ }
+  return DEFAULT_LAYOUT;
+}
+function saveLayout() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(grid.save(false).map(({ id, x, y, w, h }) => ({ id, x, y, w, h })))); }
+  catch (e) { /* storage unavailable */ }
+}
+function visibleIds() { return grid.getGridItems().map(el => el.getAttribute("gs-id")); }
+
+function addPanel(item) {
+  const p = PANELS[item.id];
+  const el = document.createElement("div");
+  el.className = "grid-stack-item";
+  el.setAttribute("gs-id", item.id);
+  el.setAttribute("gs-w", item.w ?? p.w); el.setAttribute("gs-h", item.h ?? p.h);
+  el.setAttribute("gs-min-w", 2); el.setAttribute("gs-min-h", 2);
+  if (item.x === undefined) el.setAttribute("gs-auto-position", "true");
+  else { el.setAttribute("gs-x", item.x); el.setAttribute("gs-y", item.y); }
+  el.innerHTML = `<div class="grid-stack-item-content">
+      <div class="p-head"><span class="p-title">${esc(p.title)}</span>${tip(p.tip)}<span class="p-sp"></span>
+        <button class="p-x" title="Hide panel" data-hide="${item.id}">×</button></div>
+      <div class="p-body${p.chart ? " chart" : ""}" id="body-${item.id}"></div></div>`;
+  grid.el.appendChild(el);
+  grid.makeWidget(el);
+  el.querySelector(".p-x").addEventListener("click", () => removePanel(item.id));
+  if (D) renderPanel(item.id);
+}
+function removePanel(id) {
+  const el = grid.getGridItems().find(e => e.getAttribute("gs-id") === id);
+  const body = document.getElementById("body-" + id);
+  if (charts.has(id)) { Plotly.purge(body); charts.delete(id); }
+  if (el) grid.removeWidget(el);
+  buildAddMenu();
+}
+function buildAddMenu() {
+  const shown = new Set(visibleIds());
+  const hidden = Object.keys(PANELS).filter(k => !shown.has(k));
+  const menu = document.getElementById("addMenu");
+  menu.innerHTML = hidden.length ? hidden.map(k => `<div data-add="${k}">${esc(PANELS[k].title)}</div>`).join("")
+                                 : `<div class="empty">All panels are on the canvas</div>`;
+  menu.querySelectorAll("[data-add]").forEach(d => d.addEventListener("click", () => {
+    menu.classList.remove("show"); addPanel({ id: d.dataset.add }); buildAddMenu();
+  }));
+}
+function setLocked(locked) {
+  grid.setStatic(locked);
+  document.body.classList.toggle("locked", locked);
+  document.getElementById("lockBtn").textContent = locked ? "🔒 Layout locked" : "✎ Editing layout";
+  try { localStorage.setItem(LS_KEY + ".locked", locked ? "1" : "0"); } catch (e) {}
+}
+
+function initGrid() {
+  grid = GridStack.init({
+    cellHeight: 78, margin: 6, float: false, animate: true, handle: ".p-head",
+    resizable: { handles: "se,e,s,w,sw" },
+    columnOpts: { breakpointForWindow: false, breakpoints: [{ w: 760, c: 1 }] },
+  });
+  loadLayout().forEach(addPanel);
+  grid.on("change added removed", () => { saveLayout(); fitHeight(); });
+  grid.on("resizestop", (e, el) => {
+    const id = el.getAttribute("gs-id");
+    if (charts.has(id)) Plotly.Plots.resize(document.getElementById("body-" + id));
+  });
+  buildAddMenu();
+  let locked = false;
+  try { locked = localStorage.getItem(LS_KEY + ".locked") === "1"; } catch (e) {}
+  setLocked(locked);
+  document.getElementById("lockBtn").addEventListener("click", () => setLocked(!document.body.classList.contains("locked")));
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    charts.forEach(id => Plotly.purge(document.getElementById("body-" + id))); charts.clear();
+    grid.removeAll(true);
+    DEFAULT_LAYOUT.forEach(addPanel); buildAddMenu(); saveLayout();
+  });
+  document.getElementById("addBtn").addEventListener("click", e => {
+    e.stopPropagation(); document.getElementById("addMenu").classList.toggle("show");
+  });
+  document.addEventListener("click", () => document.getElementById("addMenu").classList.remove("show"));
+  document.querySelectorAll("#win button").forEach(b => b.addEventListener("click", () => setWindow(b.dataset.h)));
+  new ResizeObserver(fitHeight).observe(document.body);
+}
+
+// ------------------------------------------------------------------ time window + zoom sync
+function windowRange(h) {
+  if (h === "all" || !D) return null;
+  const now = parseT(D.times[D.now]).getTime(), hours = Number(h);
+  return [fmtT(new Date(now - hours * 0.25 * 3600e3)), fmtT(new Date(now + hours * 0.75 * 3600e3))];
+}
+function markWindow() {
+  document.querySelectorAll("#win button").forEach(b => b.classList.toggle("on", b.dataset.h === win));
+}
+function applyRange(skipId) {
+  syncing = true;
+  const upd = xRange ? { "xaxis.range": xRange, "xaxis.autorange": false } : { "xaxis.autorange": true };
+  const jobs = [...charts].filter(id => id !== skipId).map(id => Plotly.relayout(document.getElementById("body-" + id), upd));
+  Promise.all(jobs).finally(() => { syncing = false; });
+}
+function setWindow(h) { win = h; xRange = windowRange(h); markWindow(); applyRange(null); }
+function onRelayout(id, ev) {
+  if (syncing) return;
+  if (ev["xaxis.range[0]"] !== undefined) xRange = [ev["xaxis.range[0]"], ev["xaxis.range[1]"]];
+  else if (Array.isArray(ev["xaxis.range"])) xRange = ev["xaxis.range"];
+  else if (ev["xaxis.autorange"]) xRange = null;
+  else return;
+  win = null; markWindow(); applyRange(id);
+}
+
+// ------------------------------------------------------------------ charts
+function baseLayout(ytitle, extra = {}) {
+  const t = D.times[D.now];
+  return Object.assign({
+    margin: { l: 54, r: 14, t: 6, b: 34 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { color: C.text, size: 11, family: "Source Sans Pro, Segoe UI, sans-serif" },
+    xaxis: Object.assign({ type: "date", gridcolor: C.grid, linecolor: C.grid, tickformat: "%H:%M\n%d %b",
+                           hoverformat: "%a %d %b, %H:%M" }, xRange ? { range: xRange, autorange: false } : { autorange: true }),
+    yaxis: { title: { text: ytitle, standoff: 6 }, gridcolor: C.grid, zerolinecolor: C.grid, fixedrange: true },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", bgcolor: "rgba(0,0,0,0)" },
+    hovermode: "x unified", hoverlabel: { bgcolor: "#242C37", bordercolor: "#3A4452", font: { color: C.text } },
+    dragmode: "zoom",
+    shapes: [{ type: "line", xref: "x", yref: "paper", x0: t, x1: t, y0: 0, y1: 1, line: { color: C.now, width: 1.5, dash: "dot" } }],
+    annotations: [{ x: t, xref: "x", y: 1, yref: "paper", text: D.live ? "now" : "selected", showarrow: false,
+                    font: { color: C.now, size: 10 }, xanchor: "left", yanchor: "top", xshift: 3 }],
+  }, extra);
+}
+const line = (key, name, color, more = {}) => Object.assign({
+  x: D.times, y: D.s[key], name, type: "scatter", mode: "lines", line: { color, width: 2.2, shape: "spline", smoothing: 0.6 },
+  hovertemplate: "%{y:.1f}",
+}, more);
+const CONFIG = { responsive: true, displaylogo: false, scrollZoom: true,
+                 modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d", "toggleSpikelines"] };
+
+function chartSpec(id) {
+  switch (id) {
+    case "utci": {
+      const L = baseLayout("UTCI (°C)");
+      L.shapes.unshift({ type: "rect", xref: "paper", x0: 0, x1: 1, yref: "y", y0: 9, y1: 26, fillcolor: C.good, opacity: .1, line: { width: 0 }, layer: "below" });
+      L.shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: 32, y1: 32, line: { color: "#F59331", width: 1, dash: "dash" }, layer: "below" });
+      L.annotations.push({ xref: "paper", x: 1, y: 26, yref: "y", text: "no stress ≤ 26", showarrow: false, xanchor: "right", yanchor: "top", font: { size: 10, color: "#56D364" } });
+      L.annotations.push({ xref: "paper", x: 1, y: 32, yref: "y", text: "strong heat ≥ 32", showarrow: false, xanchor: "right", yanchor: "bottom", font: { size: 10, color: "#F59331" } });
+      return [[line("utci_open_C", "Open", C.open, { hovertemplate: "%{y:.1f} °C" }),
+               line("utci_closed_C", "Closed", C.closed, { hovertemplate: "%{y:.1f} °C" })], L];
+    }
+    case "temp":
+      return [[line("air_temperature_C", "Air", C.air, { hovertemplate: "%{y:.1f} °C" }),
+               line("mrt_open_C", "MRT open", C.open, { hovertemplate: "%{y:.1f} °C" }),
+               line("mrt_closed_C", "MRT closed", C.closed, { hovertemplate: "%{y:.1f} °C" })], baseLayout("°C")];
+    case "flux": {
+      const L = baseLayout("W/m²");
+      L.yaxis.zerolinecolor = "rgba(150,160,175,.5)"; L.yaxis.zerolinewidth = 1.5;
+      return [[line("heat_flux_open_W_m2", "Open", C.open, { hovertemplate: "%{y:.0f} W/m²" }),
+               line("heat_flux_closed_W_m2", "Closed", C.closed, { hovertemplate: "%{y:.0f} W/m²" })], L];
+    }
+    case "humwind": {
+      const L = baseLayout("Humidity (%)", { yaxis2: { title: { text: "Wind (m/s)", standoff: 6 }, overlaying: "y", side: "right", showgrid: false, fixedrange: true } });
+      L.margin.r = 50;
+      return [[line("relative_humidity_percent", "Humidity", "#56D4DD", { hovertemplate: "%{y:.0f} %" }),
+               line("wind_speed_10m_ms", "Wind", "#B392F0", { yaxis: "y2", hovertemplate: "%{y:.1f} m/s" })], L];
+    }
+    case "solar": {
+      const L = baseLayout("W/m²", { yaxis2: { title: { text: "Cloud (%)", standoff: 6 }, overlaying: "y", side: "right", range: [0, 100], showgrid: false, fixedrange: true } });
+      L.margin.r = 50;
+      return [[line("solar_radiation_W_m2", "Global", C.open, { hovertemplate: "%{y:.0f} W/m²", fill: "tozeroy", fillcolor: "rgba(245,165,36,.12)" }),
+               line("direct_normal_irradiance_W_m2", "Direct normal", C.red, { hovertemplate: "%{y:.0f} W/m²" }),
+               line("diffuse_radiation_W_m2", "Diffuse", C.air, { hovertemplate: "%{y:.0f} W/m²" }),
+               line("cloud_cover_percent", "Cloud", "#6E7681", { yaxis: "y2", line: { color: "#6E7681", width: 1.5, dash: "dot" }, hovertemplate: "%{y:.0f} %" })], L];
+    }
+    case "schedule": {
+      const L = baseLayout("", { hovermode: "closest" });
+      L.yaxis = { tickvals: [0, 1], ticktext: ["CLOSED", "OPEN"], range: [-0.25, 1.25], gridcolor: C.grid, fixedrange: true, zeroline: false };
+      L.margin.l = 64; L.showlegend = false;
+      const y = D.auto_state.map(s => s === "OPEN" ? 1 : 0);
+      const changes = D.auto_state.map((s, k) => k > 0 && s !== D.auto_state[k - 1] ? k : -1).filter(k => k >= 0);
+      return [[
+        { x: D.times, y, type: "scatter", mode: "lines", line: { shape: "hv", width: 3, color: C.open },
+          fill: "tozeroy", fillcolor: "rgba(245,165,36,.10)", name: "Position",
+          customdata: D.auto_state.map((s, k) => [s, D.auto_reason[k] || "Holding position"]),
+          hovertemplate: "<b>%{customdata[0]}</b><br>%{customdata[1]}<extra></extra>" },
+        { x: changes.map(k => D.times[k]), y: changes.map(k => y[k]), type: "scatter", mode: "markers", name: "Move",
+          marker: { size: 10, color: changes.map(k => y[k] ? C.open : C.closed), line: { color: "#0D1117", width: 2 } },
+          customdata: changes.map(k => [D.auto_state[k], D.auto_reason[k]]),
+          hovertemplate: "<b>Move → %{customdata[0]}</b><br>%{customdata[1]}<extra></extra>" },
+      ], L];
+    }
+  }
+}
+function drawChart(id) {
+  const div = document.getElementById("body-" + id);
+  const [traces, layout] = chartSpec(id);
+  Plotly.react(div, traces, layout, CONFIG);
+  if (!charts.has(id)) {
+    charts.add(id);
+    div.on("plotly_relayout", ev => onRelayout(id, ev));
+    new ResizeObserver(() => { if (div.offsetWidth) Plotly.Plots.resize(div); }).observe(div);
+  }
+}
+
+// ------------------------------------------------------------------ html panels
+function kpiHtml() {
+  const i = D.now, pos = D.state === "OPEN" ? "open" : "closed";
+  const tiles = [
+    ["Air temperature", "air_temperature_C", 1, "°C", DEF.air],
+    ["Relative humidity", "relative_humidity_percent", 0, "%", DEF.rh],
+    ["Wind speed", "wind_speed_10m_ms", 1, "m/s", DEF.wind],
+    ["Surface heat flux", `heat_flux_${pos}_W_m2`, 0, "W/m²", DEF.flux],
+    ["UTCI", `utci_${pos}_C`, 1, "°C", DEF.utci],
+  ];
+  return `<div class="kpis">` + tiles.map(([label, key, d, unit, def]) => {
+    const v = D.s[key][i], p = i > 0 ? D.s[key][i - 1] : null;
+    const delta = ok(v) && ok(p) ? `${v - p >= 0 ? "▲ +" : "▼ "}${(v - p).toFixed(d)} ${unit} vs previous hour` : "&nbsp;";
+    return `<div class="kpi"><div class="k-label">${label}${tip(def)}</div>
+      <div class="k-val">${num(v, d)}<span class="u">${unit}</span></div><div class="k-delta">${delta}</div></div>`;
+  }).join("") + `</div>`;
+}
+function roofHtml() {
+  const color = D.state === "OPEN" ? C.open : C.closed, icon = D.state === "OPEN" ? "☀️" : "⛱️";
+  const rows = [["Control mode", D.mode, DEF.mode], ["Recommended", D.recommended, DEF.recommended],
+                [D.mode === "Automatic" ? "Next scheduled change" : "Next recommended change", D.next_change, DEF.next],
+                ["In position since", D.since, DEF.since]];
+  let html = `<div class="state-card" style="background:${color}1f;border:1px solid ${color}88">
+      <div class="lbl">Roof position${tip(DEF.position)}</div><div class="val" style="color:${color}">${icon} ${D.state}</div></div>`;
+  html += rows.map(([k, v, d]) => `<div class="kv"><span>${k}${tip(d)}</span><span><b>${esc(v)}</b></span></div>`).join("");
+  if (D.reason) html += `<div class="note">${esc(D.reason)}</div>`;
+  if (D.mode === "Manual") {
+    html += `<div class="btns"><button data-cmd="OPEN" ${D.state === "OPEN" ? "disabled" : ""}>Open roof</button>
+      <button data-cmd="CLOSED" ${D.state === "CLOSED" ? "disabled" : ""}>Close roof</button>
+      <button class="primary" data-cmd="${D.recommended}" ${D.recommended === D.state ? "disabled" : ""}>Apply recommendation</button></div>`;
+  }
+  return html;
+}
+function comparisonHtml() {
+  const i = D.now;
+  const col = (pos, icon, color) => {
+    const mrt = D.s[`mrt_${pos}_C`][i], u = D.s[`utci_${pos}_C`][i], [cat, catColor] = utciCat(u);
+    const active = D.state.toLowerCase() === pos;
+    return `<div class="cmp-col" style="${active ? `border-color:${color}88` : ""}">
+      <div class="cmp-head" style="color:${color}">${icon} ${pos.toUpperCase()}${active ? `<span class="badge">ACTIVE</span>` : ""}</div>
+      <div class="cmp-row"><div class="k-label">Mean radiant temperature${tip(DEF.mrt)}</div>
+        <div class="cmp-val">${num(mrt)}<span class="u">°C</span></div></div>
+      <div class="cmp-row"><div class="k-label">UTCI${tip(DEF.utci)}</div>
+        <div class="cmp-val">${num(u)}<span class="u">°C</span></div></div>
+      <div class="cat" style="color:${catColor}">● ${cat}</div></div>`;
+  };
+  const n = UTCI_CATS.length;
+  const posOf = v => {
+    const x = Math.min(Math.max(v, UTCI_EDGES[0]), UTCI_EDGES[n] - 0.01);
+    let k = 0; while (x >= UTCI_EDGES[k + 1]) k++;
+    return (k + (x - UTCI_EDGES[k]) / (UTCI_EDGES[k + 1] - UTCI_EDGES[k])) / n * 100;
+  };
+  const markers = [["O", "utci_open_C", C.open], ["C", "utci_closed_C", C.closed]].map(([lbl, key, color]) => {
+    const v = D.s[key][i];
+    return ok(v) ? `<div class="marker${lbl === "C" ? " below" : ""}" style="left:${posOf(v)}%;color:${color}" data-tip="${lbl === "O" ? "Open" : "Closed"}: ${v.toFixed(1)} °C">${lbl}</div>` : "";
+  }).join("");
+  const segs = UTCI_CATS.map(([name, color], k) =>
+    `<div class="seg-c" style="background:${color}" data-tip="${name}: ${k === 0 ? "below −40" : k === n - 1 ? "above 46" : `${UTCI_EDGES[k]} to ${UTCI_EDGES[k + 1]}`} °C"></div>`).join("");
+  const ticks = UTCI_EDGES.slice(1, -1).map((e, k) => `<span style="left:${(k + 1) / n * 100}%">${e}</span>`).join("");
+  const names = UTCI_CATS.map(([name]) => `<div>${name.replace(" stress", "")}</div>`).join("");
+  return `<div class="cmp">${col("open", "☀️", C.open)}${col("closed", "⛱️", C.closed)}</div>
+    <div class="scale-wrap"><div class="scale-title">UTCI reference scale (°C)${tip(DEF.scale)}</div>
+      <div class="scale">${segs}${markers}</div><div class="ticks">${ticks}</div><div class="names">${names}</div></div>`;
+}
+function logHtml() {
+  if (!D.events.length) return `<div class="muted">No events yet.</div>`;
+  return `<table><tr><th>Time</th><th>Event</th><th>Source</th><th>Detail</th></tr>` +
+    D.events.map(e => `<tr><td style="white-space:nowrap">${esc(e.Time)}</td><td><b>${esc(e.Event)}</b></td>
+      <td>${esc(e.Source)}</td><td class="muted">${esc(e.Detail)}</td></tr>`).join("") + `</table>`;
+}
+
+function renderPanel(id) {
+  const body = document.getElementById("body-" + id);
+  if (!body) return;
+  if (PANELS[id].chart) return drawChart(id);
+  body.innerHTML = { kpis: kpiHtml, roof: roofHtml, comparison: comparisonHtml, log: logHtml }[id]();
+  if (id === "roof") body.querySelectorAll("[data-cmd]").forEach(b =>
+    b.addEventListener("click", () => sendValue({ cmd: b.dataset.cmd, nonce: Date.now() })));
+}
+
+// ------------------------------------------------------------------ boot
+window.addEventListener("message", ev => {
+  if (!ev.data || ev.data.type !== "streamlit:render") return;
+  const raw = JSON.stringify(ev.data.args.data);
+  if (raw === lastRaw) return fitHeight();   // Streamlit re-sends unchanged args, e.g. after a resize
+  lastRaw = raw;
+  const first = D === null;
+  D = ev.data.args.data;
+  if (first) { initGrid(); xRange = windowRange(win); markWindow(); }
+  else if (win) xRange = windowRange(win);   // keep the preset window centred on the selected hour
+  visibleIds().forEach(renderPanel);
+  fitHeight();
+});
+toStreamlit("streamlit:componentReady");
+</script>
+</body>
+</html>
